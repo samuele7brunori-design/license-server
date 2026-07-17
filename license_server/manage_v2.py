@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
+    from license_server.db import connect_database, is_postgres
     from license_server.license_v2 import create_license, init_schema, store_activation_key
 except ImportError:
+    from db import connect_database, is_postgres
     from license_v2 import create_license, init_schema, store_activation_key
 
 
@@ -19,16 +23,28 @@ def _database_path(value: str | None) -> Path:
     return Path(value or os.environ.get("LICENSE_DB_PATH", "licenses.db")).resolve()
 
 
-def _connection(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys=ON")
+def _connection(path: Path, database_url: str | None = None):
+    connection = connect_database(database_url, str(path))
     init_schema(connection)
     connection.execute(
         "CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT)"
     )
     connection.commit()
     return connection
+
+
+@contextmanager
+def _open_connection(path: Path, database_url: str | None = None):
+    connection = _connection(path, database_url)
+    try:
+        yield connection
+    except BaseException:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def publish_release(
@@ -95,6 +111,11 @@ def publish_release(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Gestione sicura licenze TapeSense v2")
     parser.add_argument("--db", help="Percorso database (default LICENSE_DB_PATH)")
+    parser.add_argument(
+        "--neon",
+        action="store_true",
+        help="Usa PostgreSQL; richiede DATABASE_URL con input nascosto se non è nell'ambiente",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     create = commands.add_parser("create", help="Crea una chiave, mostrata una sola volta")
@@ -122,11 +143,21 @@ def main() -> int:
     publish.add_argument("--notes", default="")
 
     args = parser.parse_args()
+    database_url = os.environ.get("DATABASE_URL", "").strip() or None
+    if args.neon and not database_url:
+        database_url = getpass.getpass("Neon DATABASE_URL (input nascosto): ").strip()
+        if not database_url:
+            parser.error("DATABASE_URL è obbligatoria con --neon")
+    if args.db and database_url:
+        parser.error("Non usare --db insieme a DATABASE_URL o --neon")
     path = _database_path(args.db)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with _connection(path) as db:
+    if not database_url:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    with _open_connection(path, database_url) as db:
         if args.command == "create":
             pepper = os.environ.get("LICENSE_KEY_PEPPER", "").strip()
+            if args.neon and not pepper:
+                pepper = getpass.getpass("LICENSE_KEY_PEPPER (input nascosto): ").strip()
             if not pepper:
                 parser.error("LICENSE_KEY_PEPPER è obbligatoria")
             expires_at = None
@@ -170,6 +201,11 @@ def main() -> int:
                 parser.error("ID dispositivo non trovato")
             print("Dispositivo revocato.")
         elif args.command == "migrate-legacy":
+            if is_postgres(db):
+                parser.error(
+                    "migrate-legacy richiede il database SQLite originale; "
+                    "non eseguirlo direttamente su Neon"
+                )
             pepper = os.environ.get("LICENSE_KEY_PEPPER", "").strip()
             if not pepper:
                 parser.error("LICENSE_KEY_PEPPER è obbligatoria")
@@ -210,6 +246,11 @@ def main() -> int:
                     skipped += 1
             print(f"Migrazione completata: {imported} importate, {skipped} già presenti.")
         elif args.command == "publish-release":
+            if is_postgres(db):
+                parser.error(
+                    "publish-release non può salvare il file eseguibile nel filesystem "
+                    "temporaneo di Render"
+                )
             uploads = Path(
                 os.environ.get(
                     "LICENSE_UPLOADS_DIR", str(path.parent / "uploads")

@@ -35,6 +35,10 @@ class PostgresCursor:
         return [PostgresRow(zip((column.name for column in self._cursor.description), row))
                 for row in self._cursor.fetchall()]
 
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
 
 class PostgresConnection:
     is_postgres = True
@@ -67,6 +71,19 @@ class PostgresConnection:
 
     def close(self):
         self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            self.close()
+        return False
 
 
 def connect_database(database_url: str | None, sqlite_path: str):
