@@ -32,6 +32,7 @@ from flask import (
     send_file, Response, g,
 )
 from license_protocol import sign_release_manifest
+from license_server.db import connect_database, is_postgres
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -47,7 +48,7 @@ if os.environ.get("TRUST_PROXY_HEADERS", "0") == "1":
 BASE_DIR    = Path(__file__).parent
 DB_PATH     = Path(os.environ.get("LICENSE_DB_PATH", str(BASE_DIR / "licenses.db")))
 UPLOADS_DIR = Path(os.environ.get("LICENSE_UPLOADS_DIR", str(BASE_DIR / "uploads")))
-UPLOADS_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _safe_upload_path(filename: str) -> Path | None:
@@ -76,10 +77,10 @@ except ImportError:  # deployed files live side-by-side under /opt/license_serve
 
 def _get_db() -> sqlite3.Connection:
     if "db" not in g:
-        g.db = sqlite3.connect(str(DB_PATH), detect_types=sqlite3.PARSE_DECLTYPES)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
-        g.db.execute("PRAGMA foreign_keys=ON")
+        g.db = connect_database(os.environ.get("DATABASE_URL"), str(DB_PATH))
+        if not is_postgres(g.db):
+            g.db.execute("PRAGMA journal_mode=WAL")
+            g.db.execute("PRAGMA foreign_keys=ON")
     return g.db
 
 
@@ -92,6 +93,46 @@ def _close_db(exc=None):
 
 def _init_db():
     """Create tables and initial config rows on first run."""
+    if os.environ.get("DATABASE_URL"):
+        conn = connect_database(os.environ["DATABASE_URL"], str(DB_PATH))
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS licenses (
+                key TEXT PRIMARY KEY,
+                plan TEXT DEFAULT 'lifetime',
+                expires_at TEXT,
+                max_machines INTEGER DEFAULT 2,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                active INTEGER DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS activations (
+                license_key TEXT NOT NULL REFERENCES licenses(key),
+                machine_id TEXT NOT NULL,
+                activated_at TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (license_key, machine_id)
+            );
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+        for key, value in (
+            ("current_version", "1.1.0"),
+            ("version_notes", ""),
+            ("exe_filename", "TapeSense.exe"),
+        ):
+            conn.execute(
+                "INSERT INTO app_config(key,value) VALUES(?,?) "
+                "ON CONFLICT (key) DO NOTHING",
+                (key, value),
+            )
+        _init_v2_schema(conn)
+        conn.commit()
+        conn.close()
+        return
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -156,7 +197,7 @@ def health():
     try:
         _get_db().execute("SELECT 1").fetchone()
         return jsonify({"ok": True, "protocol": 2})
-    except sqlite3.Error:
+    except Exception:
         return jsonify({"ok": False}), 503
 
 
@@ -188,7 +229,9 @@ def _get_config(key: str) -> str:
 
 def _set_config(key: str, value: str):
     _get_db().execute(
-        "INSERT OR REPLACE INTO app_config(key,value) VALUES(?,?)", (key, value)
+        "INSERT INTO app_config(key,value) VALUES(?,?) "
+        "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+        (key, value),
     )
     _get_db().commit()
 
