@@ -50,6 +50,53 @@ def _key_hash(activation_key: str, pepper: str) -> str:
 
 
 def init_schema(connection: sqlite3.Connection) -> None:
+    if getattr(connection, "is_postgres", False):
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS licenses_v2 (
+                id             TEXT PRIMARY KEY,
+                key_hash       TEXT NOT NULL UNIQUE,
+                key_last4      TEXT NOT NULL,
+                plan           TEXT NOT NULL,
+                features_json  TEXT NOT NULL,
+                expires_at     TEXT,
+                max_devices    INTEGER NOT NULL,
+                active         INTEGER NOT NULL DEFAULT 1,
+                created_at     TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS devices_v2 (
+                id                 TEXT PRIMARY KEY,
+                license_id         TEXT NOT NULL REFERENCES licenses_v2(id),
+                public_key         TEXT NOT NULL,
+                public_key_sha256  TEXT NOT NULL,
+                activated_at       TEXT NOT NULL,
+                last_seen          TEXT NOT NULL,
+                revoked            INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_devices_v2_license
+                ON devices_v2(license_id);
+            CREATE TABLE IF NOT EXISTS challenges_v2 (
+                id          TEXT PRIMARY KEY,
+                license_id  TEXT NOT NULL REFERENCES licenses_v2(id),
+                device_id   TEXT NOT NULL REFERENCES devices_v2(id),
+                challenge   TEXT NOT NULL UNIQUE,
+                expires_at  TEXT NOT NULL,
+                consumed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_challenges_v2_device
+                ON challenges_v2(device_id, expires_at);
+            CREATE TABLE IF NOT EXISTS license_audit_v2 (
+                id           BIGSERIAL PRIMARY KEY,
+                occurred_at  TEXT NOT NULL,
+                event_type   TEXT NOT NULL,
+                license_id   TEXT,
+                device_id    TEXT,
+                details_json TEXT NOT NULL
+            )
+            """
+        )
+        connection.commit()
+        return
     connection.execute("PRAGMA foreign_keys=ON")
     connection.executescript(
         """
