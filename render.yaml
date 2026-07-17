@@ -1,19 +1,29 @@
 services:
   - type: web
-    name: license-server
+    name: tapesense-license-server
     env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
-    envVars:
-      - key: ADMIN_PASSWORD
-        sync: false                  # imposta manualmente nella dashboard Render
-      - key: DATABASE_URL
-        fromDatabase:
-          name: license-db
-          property: connectionString  # Render inietta automaticamente postgres://...
+    plan: starter
+    buildCommand: pip install -r license_server/requirements.txt
+    startCommand: gunicorn license_server.server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
     healthCheckPath: /health
-
-databases:
-  - name: license-db
-    plan: free                       # PostgreSQL gratuito offerto da Render
+    disk:
+      name: license-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: LICENSE_DB_PATH
+        value: /var/data/licenses.db
+      - key: LICENSE_UPLOADS_DIR
+        value: /var/data/uploads
+      - key: LICENSE_KEY_PEPPER
+        sync: false
+      - key: LICENSE_SIGNING_PRIVATE_KEY_B64
+        sync: false
+      - key: LICENSE_SIGNING_KEY_ID
+        sync: false
+      - key: TRUST_PROXY_HEADERS
+        value: "1"
+      - key: ENABLE_LEGACY_LICENSE_API
+        value: "0"
+      - key: ENABLE_LEGACY_ADMIN
+        value: "0"
