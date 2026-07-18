@@ -65,10 +65,12 @@ try:
     from license_server.license_v2 import create_blueprint as _create_v2_blueprint
     from license_server.license_v2 import init_schema as _init_v2_schema
     from license_server.license_v2 import authenticate_bearer_lease as _authenticate_v2
+    from license_server.license_v2 import pepper_fingerprint as _pepper_fingerprint
 except ImportError:  # deployed files live side-by-side under /opt/license_server
     from license_v2 import create_blueprint as _create_v2_blueprint
     from license_v2 import init_schema as _init_v2_schema
     from license_v2 import authenticate_bearer_lease as _authenticate_v2
+    from license_v2 import pepper_fingerprint as _pepper_fingerprint
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +198,15 @@ app.register_blueprint(_create_v2_blueprint(_get_db, _check_rate))
 def health():
     try:
         _get_db().execute("SELECT 1").fetchone()
-        return jsonify({"ok": True, "protocol": 2})
+        fingerprint = _pepper_fingerprint(
+            os.environ.get("LICENSE_KEY_PEPPER", "").strip()
+        )
+        return jsonify({
+            "ok": True,
+            "protocol": 2,
+            "service": "tapesense-licensing",
+            "pepper_fingerprint": fingerprint,
+        })
     except Exception:
         return jsonify({"ok": False}), 503
 

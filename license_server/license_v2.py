@@ -25,6 +25,7 @@ from license_protocol import (
 
 
 GENERIC_INVALID = "Licenza o dispositivo non validi."
+PEPPER_FINGERPRINT_CONTEXT = b"TapeSense licensing v2 pepper fingerprint"
 
 
 def _now() -> datetime:
@@ -47,6 +48,15 @@ def _key_hash(activation_key: str, pepper: str) -> str:
         raise RuntimeError("LICENSE_KEY_PEPPER troppo corta")
     normalized = activation_key.strip().upper().encode("utf-8")
     return hmac.new(pepper.encode("utf-8"), normalized, hashlib.sha256).hexdigest()
+
+
+def pepper_fingerprint(pepper: str) -> str:
+    """Return a non-secret identifier used to detect admin/server mismatch."""
+    if len(pepper) < 32:
+        raise RuntimeError("LICENSE_KEY_PEPPER troppo corta")
+    return hmac.new(
+        pepper.encode("utf-8"), PEPPER_FINGERPRINT_CONTEXT, hashlib.sha256
+    ).hexdigest()
 
 
 def init_schema(connection: sqlite3.Connection) -> None:
