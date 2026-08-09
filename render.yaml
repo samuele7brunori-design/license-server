@@ -5,6 +5,8 @@ services:
     plan: starter
     buildCommand: pip install -r license_server/requirements.txt
     startCommand: gunicorn license_server.server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    # Liveness only: /health must never query DATABASE_URL, otherwise Render's
+    # frequent probes prevent Neon from scaling to zero.
     healthCheckPath: /health
     disk:
       name: license-data

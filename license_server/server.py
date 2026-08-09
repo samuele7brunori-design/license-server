@@ -196,8 +196,14 @@ app.register_blueprint(_create_v2_blueprint(_get_db, _check_rate))
 
 @app.get("/health")
 def health():
+    """Cheap liveness check used by Render and administrative clients.
+
+    This endpoint must never open the application database. Render polls it every
+    few seconds; touching Neon here prevents scale-to-zero and turns a liveness
+    probe into continuous billable compute. Real licensing requests still fail
+    closed when the database is unavailable.
+    """
     try:
-        _get_db().execute("SELECT 1").fetchone()
         fingerprint = _pepper_fingerprint(
             os.environ.get("LICENSE_KEY_PEPPER", "").strip()
         )

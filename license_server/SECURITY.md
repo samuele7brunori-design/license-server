@@ -44,6 +44,20 @@ audit.
 
 ## Operazioni server
 
+### Health check e contenimento costi
+
+`/health` e' un controllo di sola liveness e non deve mai aprire PostgreSQL. Render
+lo interroga ogni pochi secondi: una query in questo endpoint impedirebbe a Neon di
+raggiungere lo scale-to-zero e produrrebbe compute fatturabile continuo. La relativa
+regressione e' coperta dai test.
+
+La disponibilita' del database viene verificata dalle vere richieste di licensing,
+che continuano a fallire in modo chiuso se PostgreSQL non e' raggiungibile. Per una
+diagnostica manuale usare la console Neon o il client amministrativo; non collegare
+monitor periodici a endpoint che eseguono query. Configurare inoltre gli avvisi di
+spesa Neon come segnalazione preventiva, ricordando che una soglia di notifica non e'
+un limite automatico alla spesa.
+
 Il deploy VPS richiede `DOMAIN`, `CERTBOT_EMAIL`, `LICENSE_KEY_PEPPER`,
 `LICENSE_SIGNING_PRIVATE_KEY_B64` e `LICENSE_SIGNING_KEY_ID`. Non contiene password
 predefinite, espone Gunicorn solo su loopback, configura HTTPS obbligatorio, header
