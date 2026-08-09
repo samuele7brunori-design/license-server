@@ -211,6 +211,7 @@ def health():
             "ok": True,
             "protocol": 2,
             "service": "tapesense-licensing",
+            "database_probe": "on-demand",
             "pepper_fingerprint": fingerprint,
         })
     except Exception:

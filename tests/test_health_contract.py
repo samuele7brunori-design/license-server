@@ -27,6 +27,7 @@ def test_health_identifies_service_and_pepper(tmp_path, monkeypatch):
             "ok": True,
             "protocol": 2,
             "service": "tapesense-licensing",
+            "database_probe": "on-demand",
             "pepper_fingerprint": pepper_fingerprint(pepper),
         }
 
