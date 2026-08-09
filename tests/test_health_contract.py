@@ -13,16 +13,22 @@ def test_health_identifies_service_and_pepper(tmp_path, monkeypatch):
     server = importlib.import_module("license_server.server")
     server.app.config.update(TESTING=True)
 
-    with server.app.test_client() as client:
-        response = client.get("/health")
+    def fail_if_health_touches_database():
+        raise AssertionError("/health must not open the licensing database")
 
-    assert response.status_code == 200
-    assert response.get_json() == {
-        "ok": True,
-        "protocol": 2,
-        "service": "tapesense-licensing",
-        "pepper_fingerprint": pepper_fingerprint(pepper),
-    }
+    monkeypatch.setattr(server, "_get_db", fail_if_health_touches_database)
+
+    with server.app.test_client() as client:
+        responses = [client.get("/health") for _ in range(3)]
+
+    for response in responses:
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "ok": True,
+            "protocol": 2,
+            "service": "tapesense-licensing",
+            "pepper_fingerprint": pepper_fingerprint(pepper),
+        }
 
 
 def test_health_fails_closed_when_pepper_is_missing(tmp_path, monkeypatch):
