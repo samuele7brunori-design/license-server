@@ -251,6 +251,15 @@ def _issue_lease(connection, license_row, device_row) -> str:
     issued = _now()
     refresh_hours = min(168, max(1, int(os.environ.get("LICENSE_REFRESH_HOURS", "24"))))
     lease_days = min(30, max(1, int(os.environ.get("LICENSE_LEASE_DAYS", "7"))))
+    expires = issued + timedelta(days=lease_days)
+    if license_row["expires_at"]:
+        subscription_expires = datetime.fromisoformat(
+            license_row["expires_at"].replace("Z", "+00:00")
+        )
+        if subscription_expires.tzinfo is None:
+            subscription_expires = subscription_expires.replace(tzinfo=timezone.utc)
+        expires = min(expires, subscription_expires.astimezone(timezone.utc))
+    refresh_after = min(issued + timedelta(hours=refresh_hours), expires)
     payload = {
         "protocol_version": 2,
         "audience": "tapesense-desktop",
@@ -260,8 +269,8 @@ def _issue_lease(connection, license_row, device_row) -> str:
         "plan": license_row["plan"],
         "features": json.loads(license_row["features_json"]),
         "issued_at": _iso(issued),
-        "refresh_after": _iso(issued + timedelta(hours=refresh_hours)),
-        "lease_expires_at": _iso(issued + timedelta(days=lease_days)),
+        "refresh_after": _iso(refresh_after),
+        "lease_expires_at": _iso(expires),
         "token_id": f"tok_{uuid.uuid4().hex}",
     }
     return sign_lease(payload, private_key, key_id)
